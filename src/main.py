@@ -16,7 +16,7 @@ def main():
     print("Starting the program...")
 
     # Load data
-    ticker = "AAPL"
+    ticker = "GBTC"
     start_date = "2020-01-01" 
     raw_data = download_stock_data(ticker, start_date)
     
