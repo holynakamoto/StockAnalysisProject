@@ -1,6 +1,7 @@
 # src/data_preparation/prepare_data.py
 
 import pandas as pd
+from sklearn.preprocessing import StandardScaler
 
 def clean_data(stock_data):
     """
@@ -23,7 +24,7 @@ def _clean_single_df(df):
     df.dropna(inplace=True)
     return df
 
-def add_technical_indicators(df):
+def add_indicators(df):
     """
     Adds technical indicators to the stock data.
     :param df: DataFrame of stock data.

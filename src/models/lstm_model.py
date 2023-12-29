@@ -1,51 +1,70 @@
-# src/models/lstm_model.py
+"""LSTM models for time series forecasting"""
 
+import matplotlib.pyplot as plt
 from keras.models import Sequential
-from keras.layers import LSTM, Dense, Dropout
-import numpy as np
+from keras.layers import LSTM, Dense, Dropout  
 
-def create_lstm_model(input_shape, units=50, dropout=0.2, output_units=1):
+def create_lstm_model(input_shape, units=50, dropout=0.2):
+    """Create LSTM network for sequence forecasting
+    
+    Arguments:
+        input_shape {tuple} -- input dimension shape
+        units {int} -- number of LSTM neurons  
+        dropout {float} -- dropout rate
+        
+    Returns:
+        model {keras Sequential} -- compiled LSTM model
     """
-    Creates an LSTM model for time series prediction.
 
-    :param input_shape: The shape of the training dataset.
-    :param units: The number of neurons in the LSTM layer.
-    :param dropout: The dropout rate for regularization.
-    :param output_units: The number of output units.
-    :return: Compiled LSTM model.
-    """
     model = Sequential()
-    model.add(LSTM(units, return_sequences=True, input_shape=input_shape))
-    model.add(Dropout(dropout))
-    model.add(LSTM(units, return_sequences=False))
-    model.add(Dropout(dropout))
-    model.add(Dense(units))
-    model.add(Dense(output_units))
-
-    model.compile(optimizer='adam', loss='mean_squared_error')
+    model.add(LSTM(units, dropout=dropout, input_shape=input_shape)) 
+    model.add(Dense(1))
+    
+    model.compile(loss='mse', optimizer='adam')
+    
     return model
 
-def train_lstm_model(model, x_train, y_train, batch_size=1, epochs=10):
-    """
-    Trains the LSTM model.
+def train_model(model, x_train, y_train):
+   """Train LSTM model
+    
+    Arguments:
+        model {keras model} -- LSTM model
+        x_train {array} -- training features 
+        y_train {array} -- training labels
+   """
+    
+   # Validate input data  
+   if len(x_train.shape) != 3:
+        raise ValueError('Training data must be 3D (samples, timesteps, features)')
+    
+   # Fit model   
+   history = model.fit(x_train, y_train, epochs=10) 
+   return history
+   
+def evaluate_model(model, x_test, y_test):
+    """Evaluate model on test data"""
+    
+    # Generate predictions
+    preds = model.predict(x_test)
+    
+    # Print samples
+    print("Predicted:", preds[:5]) 
+    print("Actual:", y_test[:5])
 
-    :param model: The LSTM model to train.
-    :param x_train: Training data features.
-    :param y_train: Training data labels.
-    :param batch_size: The size of the batch.
-    :param epochs: The number of epochs to train for.
-    :return: Trained model.
-    """
-    model.fit(x_train, y_train, batch_size=batch_size, epochs=epochs)
-    return model
-
-def make_predictions(model, x_test):
-    """
-    Uses the LSTM model to make predictions.
-
-    :param model: The trained LSTM model.
-    :param x_test: Test data features.
-    :return: Predictions.
-    """
-    predictions = model.predict(x_test)
-    return predictions
+    return preds
+    
+if __name__ == '__main__':
+    
+    # Sample data
+    x_train = np.random.random((1000, 60, 1))
+    y_train = np.random.random((1000,))
+    
+    # Train model
+    model = create_lstm_model(input_shape=(60,1)) 
+    history = train_model(model, x_train, y_train)
+    
+    # Plot loss  
+    plt.plot(history.history['loss']) 
+    plt.title("Model Loss")
+    plt.ylabel("Loss")
+    plt.xlabel("Epoch")

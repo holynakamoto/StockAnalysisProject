@@ -1,114 +1,146 @@
-# src/main.py
-
-import numpy as np 
-from datetime import datetime
-from src.data_collection.fetch_data import download_stock_data, download_multiple_stocks
-from src.data_preparation.prepare_data import clean_data, add_technical_indicators, normalize_data
-from src.analysis.correlation import calculate_correlation_matrix, plot_correlation_matrix
-from src.analysis.risk_return import calculate_annualized_return, calculate_volatility, plot_risk_return
-from src.models.lstm_model import create_lstm_model, train_lstm_model, make_predictions
-from src.visualization.plot_data import plot_stock_prices, plot_volume, plot_moving_averages
-from src.visualization.plot_settings import set_plot_style, set_figure_size
+import numpy as np
+import pandas as pd
+import tensorflow as tf
+import matplotlib.pyplot as plt
 from sklearn.preprocessing import MinMaxScaler
+from sklearn.metrics import mean_squared_error, mean_absolute_error
+from keras.models import Sequential
+from keras.layers import LSTM, Dense
+# Assuming the following modules are correctly implemented
+from models.lstm_model import create_lstm_model, train_model, evaluate_model
+from data_collection.fetch_data import download_stock_data
+from data_preparation.prepare_data import clean_data, add_indicators
+from sklearn.model_selection import train_test_split
 
 def main():
-    # Set global plot settings
-    set_plot_style()
-    set_figure_size()
+    print("Starting the program...")
 
-    single_stock_data = download_stock_data("AAPL", datetime(2020, 1, 1))
-    print("Single Stock Data fetched.")
+    # Load data
+    ticker = "AAPL"
+    start_date = "2020-01-01" 
+    raw_data = download_stock_data(ticker, start_date)
+    
+    # Extract feature columns
+    X = raw_data[['Open','High','Low','Volume']]
 
-    multiple_stocks_data = download_multiple_stocks(["AAPL", "MSFT", "GOOG"], datetime(2020, 1, 1))
-    print("Multiple Stocks Data fetched.")
+    # Normalize features
+    scaler = MinMaxScaler(feature_range=(0, 1))
+    scaled = scaler.fit_transform(X)
 
-    cleaned_data_single = clean_data(single_stock_data)
-    with_indicators_single = add_technical_indicators(cleaned_data_single)
-    normalized_data_single = normalize_data(with_indicators_single)
-    print("Single Stock Data prepared.")
+    # Split into train and test sets
+    train_size = int(len(scaled) * 0.7)
+    train, test = scaled[0:train_size, :], scaled[train_size:len(scaled), :]
 
-    cleaned_data_multiple = clean_data(multiple_stocks_data)
-    with_indicators_multiple = {ticker: add_technical_indicators(df) for ticker, df in cleaned_data_multiple.items()}
-    normalized_data_multiple = {ticker: normalize_data(df) for ticker, df in with_indicators_multiple.items()}
-    print("Multiple Stocks Data prepared.")
+    # Convert dataset to supervised learning format
+    def to_supervised(data, n_in=1, n_out=1, dropnan=True):
+        n_vars = 1 if type(data) is list else data.shape[1]
+        df = pd.DataFrame(data)
+        cols, names = list(), list()
+        # Input sequence (t-n, ... t-1)
+        for i in range(n_in, 0, -1):
+            cols.append(df.shift(i))
+            names += [('var%d(t-%d)' % (j+1, i)) for j in range(n_vars)]
+        # Forecast sequence (t, t+1, ... t+n)
+        for i in range(0, n_out):
+            cols.append(df.shift(-i))
+            if i == 0:
+                names += [('var%d(t)' % (j+1)) for j in range(n_vars)]
+            else:
+                names += [('var%d(t+%d)' % (j+1, i)) for j in range(n_vars)]
+        # Put it all together
+        agg = pd.concat(cols, axis=1)
+        agg.columns = names
+        # Drop rows with NaN values
+        if dropnan:
+            agg.dropna(inplace=True)
+        return agg
 
-    correlation_matrix_single = calculate_correlation_matrix(normalized_data_single)
-    plot_correlation_matrix(correlation_matrix_single, title="Correlation Matrix - Single Stock")
-    print("Correlation analysis for single stock completed.")
+    # Frame as supervised learning
+    reframed = to_supervised(scaled, 1, 1)
+    print("Data reframed for supervised learning.")
 
-    annualized_return_single = calculate_annualized_return(normalized_data_single)
-    volatility_single = calculate_volatility(normalized_data_single)
-    plot_risk_return(normalized_data_single, period='daily')
-    print("Risk-return analysis for single stock completed.")
+    # Split into input and outputs
+    n_obs = reframed.shape[1] - 1
+    train_X, train_y = reframed.iloc[:train_size, :n_obs], reframed.iloc[:train_size, -1]
+    test_X, test_y = reframed.iloc[train_size:, :n_obs], reframed.iloc[train_size:, -1]
 
-    # Data Preparation for LSTM Model
-    data = single_stock_data.filter(['Close'])
-    dataset = data.values
-    training_data_len = int(np.ceil(len(dataset) * 0.95))
+    # Reshape input to be 3D [samples, timesteps, features]
+    train_X = train_X.values.reshape((train_X.shape[0], 1, train_X.shape[1]))
+    test_X = test_X.values.reshape((test_X.shape[0], 1, test_X.shape[1]))
+    print("Input data reshaped for LSTM.")
 
-    # Scale the data
-    scaler = MinMaxScaler(feature_range=(0,1))
-    scaled_data = scaler.fit_transform(dataset)
+    # Define LSTM model
+    model = Sequential()
+    model.add(LSTM(50, input_shape=(train_X.shape[1], train_X.shape[2])))
+    model.add(Dense(1))
+    model.compile(loss='mae', optimizer='adam')
+    print("LSTM model defined and compiled.")
 
-    # Create the training data set
-# Create the scaled training data set
-train_data = scaled_data[0:int(training_data_len), :]
-# Split the data into x_train and y_train data sets
-x_train = []
-y_train = []
+    # Fit the LSTM model
+    history = model.fit(train_X, train_y, epochs=50, batch_size=72, validation_data=(test_X, test_y), verbose=2, shuffle=False)
 
-for i in range(60, len(train_data)):
-    x_train.append(train_data[i-60:i, 0])
-    y_train.append(train_data[i, 0])
-    if i<= 61:
-        print(x_train)
-        print(y_train)
-        print()
+    # Make predictions
+    train_predict = model.predict(train_X)
+    test_predict = model.predict(test_X)
 
-# Convert the x_train and y_train to numpy arrays
-x_train, y_train = np.array(x_train), np.array(y_train)
+    # Convert train_y and test_y from Pandas Series to NumPy arrays and reshape
+    train_y_reshaped = train_y.values.reshape(-1, 1)
+    test_y_reshaped = test_y.values.reshape(-1, 1)
 
-# Reshape the data
-x_train = np.reshape(x_train, (x_train.shape[0], x_train.shape[1], 1))
-# x_train.shape = (len(train), 60 timesteps, 1 feature)
-# print(x_train.shape)
-# Create the test data set
-test_data = scaled_data[training_data_len - 60:, :]
-# Split the data into x_test and y_test
-x_test = []
-y_test = []
-for i in range(60, len(test_data)):
-    x_test.append(test_data[i-60:i, 0])
-    y_test.append(test_data[i, 0])
-    if i <= 61:
-        print(x_test)
-        print(y_test)
-        print()
-        x_test, y_test = np.array(x_test), np.array(y_test)
-        x_test = np.reshape(x_test, (x_test.shape[0], x_test.shape[1], 1))
-        print(x_test.shape)
-        print(y_test.shape)
-        # Create and train the LSTM model
-        model = create_lstm_model(input_shape=x_train.shape[1:])
-        trained_model = train_lstm_model(model, x_train, y_train)
-        predictions = make_predictions(trained_model, x_test)
-        print("LSTM model predictions:", predictions)
-        print(x_test.shape)
-        print(y_test.shape)
-        print(predictions.shape)
+    # Inverse transform predictions and actual values
+    train_predict = scaler.inverse_transform(np.concatenate((train_predict, np.zeros((train_predict.shape[0], 3))), axis=1))[:, 0]
+    test_predict = scaler.inverse_transform(np.concatenate((test_predict, np.zeros((test_predict.shape[0], 3))), axis=1))[:, 0]
+    actual_train_y = scaler.inverse_transform(np.concatenate((train_y_reshaped, np.zeros((train_y_reshaped.shape[0], 3))), axis=1))[:, 0]
+    actual_test_y = scaler.inverse_transform(np.concatenate((test_y_reshaped, np.zeros((test_y_reshaped.shape[0], 3))), axis=1))[:, 0]
 
 
-    # LSTM Model - Placeholder for actual data preparation
-    # x_train, y_train, x_test = prepare_data_for_lstm(normalized_data_single)
-    # model = create_lstm_model(input_shape=x_train.shape[1:])
-    # trained_model = train_lstm_model(model, x_train, y_train)
-    # predictions = make_predictions(trained_model, x_test)
-    # print("LSTM model predictions:", predictions)
+    # Calculate RMSE
+    train_rmse = np.sqrt(mean_squared_error(actual_train_y, train_predict))
+    test_rmse = np.sqrt(mean_squared_error(actual_test_y, test_predict))
+    print('Train RMSE: %.3f' % train_rmse)
+    print('Test RMSE: %.3f' % test_rmse)
 
-    # Visualization of Stock Data
-    plot_stock_prices(cleaned_data_single, "AAPL")
-    plot_volume(cleaned_data_single, "AAPL")
-    plot_moving_averages(with_indicators_single, "AAPL")
+    # Propose trade strategy
+    def propose_trades(actual, predicted):
+        trades = pd.DataFrame({'actual': actual, 'predicted': predicted})
+        trades['signal'] = np.where(trades['predicted'] > trades['actual'].shift(1), 'Buy', 'Sell')
+        trades['returns'] = trades['actual'].pct_change()
+        trades['strategy_returns'] = trades['returns'] * trades['signal'].shift(1).eq('Buy').astype(int)
+        return trades.dropna()
 
-if __name__ == "__main__":
+    # Apply trade strategy
+    trades = propose_trades(actual_test_y, test_predict)
+    print(trades.head())
+
+    # Plot trade signals
+    plt.figure(figsize=(12, 6))
+    plt.plot(trades['actual'], label='Actual Price', alpha=0.5)
+    buy_signals = trades[trades['signal'] == 'Buy']
+    sell_signals = trades[trades['signal'] == 'Sell']
+    plt.plot(buy_signals.index, trades['actual'][buy_signals.index], '^', markersize=10, color='g', label='Buy Signal')
+    plt.plot(sell_signals.index, trades['actual'][sell_signals.index], 'v', markersize=10, color='r', label='Sell Signal')
+    plt.title('Trade Signals')
+    plt.xlabel('Day')
+    plt.ylabel('Price')
+    plt.legend()
+    plt.show()
+
+    # Calculate and plot cumulative returns
+    trades['cumulative_returns'] = (1 + trades['strategy_returns']).cumprod() - 1
+    plt.figure(figsize=(12, 6))
+    plt.plot(trades['cumulative_returns'], label='Strategy Returns')
+    plt.plot(trades['returns'].cumsum(), label='Buy and Hold Returns')
+    plt.title('Cumulative Returns')
+    plt.xlabel('Day')
+    plt.ylabel('Cumulative Returns')
+    plt.legend()
+    plt.show()
+
+# ... [Rest of the main function] ...
+
+if __name__=='__main__':
+    main()
+
+
+if __name__=='__main__':
     main()
