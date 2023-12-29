@@ -1,0 +1,9 @@
+# Add project dependencies here
+pandas
+numpy
+yfinance
+matplotlib
+seaborn
+scikit-learn
+keras
+tensorflow
