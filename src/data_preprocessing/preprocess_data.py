@@ -1,3 +1,4 @@
+import pandas as pd
 from data_collection.download_data import download_stock_data
 
 # Get downloaded data
