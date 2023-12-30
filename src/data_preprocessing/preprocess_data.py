@@ -1,5 +1,3 @@
-# src/data_preprocessing/preprocess_data.py
-import pandas as pd
 from data_collection.download_data import download_stock_data
 
 # Get downloaded data
@@ -12,6 +10,20 @@ def prepare_data(df):
     df = clean(df)
     df = add_indicators(df)
     return df
+
+
+def calculate_rsi(data, period=14):
+    delta = data.diff(1)
+    gain = delta.where(delta > 0, 0)
+    loss = -delta.where(delta < 0, 0)
+
+    avg_gain = gain.rolling(window=period).mean()
+    avg_loss = loss.rolling(window=period).mean()
+
+    relative_strength = avg_gain / avg_loss
+    rsi = 100 - (100 / (1 + relative_strength))
+
+    return rsi
 
 
 prepared_data = {}
@@ -30,7 +42,7 @@ def clean(df: pd.DataFrame) -> pd.DataFrame:
 
 def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     """Adds technical indicators"""
-    df["RSI"] = RSI(df["Close"])
+    df["RSI"] = calculate_rsi(df["Close"])
     df["SMA50"] = df["Close"].rolling(50).mean()
     return df
 
